@@ -1533,6 +1533,19 @@ const SETTINGS_SCHEMA = {
         description: 'Skip the next speaker check.',
         showInDialog: false,
       },
+      warmStartupPrompt: {
+        type: 'boolean',
+        label: 'Warm Startup Prompt',
+        category: 'Model',
+        requiresRestart: true,
+        default: false,
+        description:
+          'Send the startup prompt once at launch so its prefill populates ' +
+          'the provider prompt cache before your first message. Speeds up the ' +
+          'first turn against a local server; costs a full prefill on every ' +
+          'launch, including ones where you ask nothing.',
+        showInDialog: true,
+      },
       skipWorkflowUsageWarning: {
         type: 'boolean',
         label: 'Skip Workflow Usage Warning',

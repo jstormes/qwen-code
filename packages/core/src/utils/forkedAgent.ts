@@ -339,6 +339,13 @@ export interface CachePathParams {
    * calls — appropriate for most forked queries.
    */
   preserveTools?: boolean;
+  /**
+   * Cap generation length for this request. Callers that only need the
+   * prompt prefilled — not an answer — pass 1: prefill populates the
+   * server's prompt cache regardless of how few tokens are generated, so
+   * the completion itself is wasted work. Omitted: provider default.
+   */
+  maxOutputTokens?: number;
 }
 
 /** AgentHeadless path: multi-turn, full tool access, isolated session. */
@@ -464,6 +471,7 @@ export async function runForkedAgent(
       jsonSchema,
       abortSignal,
       preserveTools,
+      maxOutputTokens,
     } = params;
     const modelSelector = params.model ?? cacheSafeParams.model;
     const modelRuntime = await buildForkedModelRuntime(
@@ -479,6 +487,9 @@ export async function runForkedAgent(
         ? {}
         : { ...NO_TOOLS };
       if (abortSignal) requestConfig.abortSignal = abortSignal;
+      if (maxOutputTokens !== undefined) {
+        requestConfig.maxOutputTokens = maxOutputTokens;
+      }
       if (jsonSchema) {
         requestConfig.responseMimeType = 'application/json';
         requestConfig.responseJsonSchema = jsonSchema;

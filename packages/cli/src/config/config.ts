@@ -2304,6 +2304,7 @@ export async function loadCliConfig(
     shellHeartbeatIntervalMs: settings.tools?.shell?.heartbeatIntervalMs,
     preventSystemSleep: settings.general?.preventSystemSleep ?? true,
     skipNextSpeakerCheck: settings.model?.skipNextSpeakerCheck,
+    warmStartupPrompt: settings.model?.warmStartupPrompt,
     skipWorkflowUsageWarning: settings.model?.skipWorkflowUsageWarning ?? false,
     skipLoopDetection: settings.model?.skipLoopDetection ?? true,
     maxToolCallsPerTurn: settings.model?.maxToolCallsPerTurn,

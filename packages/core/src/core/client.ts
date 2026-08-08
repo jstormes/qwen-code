@@ -107,6 +107,7 @@ import { uiTelemetryService } from '../telemetry/uiTelemetry.js';
 import {
   saveCacheSafeParams,
   clearCacheSafeParams,
+  runForkedAgent,
 } from '../utils/forkedAgent.js';
 
 // Utilities
@@ -470,6 +471,67 @@ export class GeminiClient {
 
     // Clean up stale tool result files from previous sessions (fire-and-forget)
     void cleanupOldToolResults(Storage.getGlobalTempDir(), 24 * 60 * 60 * 1000);
+
+    // Prefill the startup prompt so the user's first message doesn't pay for
+    // it (fire-and-forget; no-op unless model.warmStartupPrompt is enabled).
+    void this.warmStartupPrompt();
+  }
+
+  /**
+   * Fire the assembled startup prompt once, at `maxOutputTokens: 1`, so the
+   * provider prefills it before the user's first message arrives.
+   *
+   * Prefill is what populates a prompt cache; the completion is irrelevant, so
+   * one token is enough. Measured against a local llama.cpp server running
+   * `--cache-ram`: a cold 15k-token prefix cost 30.2 s, after which a real turn
+   * carrying a *different* user message reused 99.9% of it and returned in
+   * 0.94 s. A control request with an unseen prefix still paid full price, so
+   * that is a genuine cache hit rather than a generally warm server.
+   *
+   * Three things this must not do, worst first:
+   *
+   * 1. **Strip tools.** Tool declarations sit inside the cached prefix, so a
+   *    warm request without `preserveTools` diverges from the real turn
+   *    *mid-prompt* — and mid-prompt divergence reuses nothing on
+   *    hybrid/recurrent models. The warm would burn a full prefill and buy
+   *    exactly zero, with no error: the symptom is "no speedup".
+   * 2. **Touch the transcript.** `runForkedAgent`'s cache path builds an
+   *    isolated chat with no recording service, so this never reaches history,
+   *    `/chat`, or the user's token accounting.
+   * 3. **Block or throw.** Called fire-and-forget, and every failure is
+   *    swallowed — a failed warm just means the first turn pays full price,
+   *    which is the behaviour without this feature at all.
+   *
+   * Runs on resumed sessions too: their first turn pays the same cold prefill,
+   * so cost tracks benefit either way.
+   */
+  private async warmStartupPrompt(): Promise<void> {
+    if (!this.config.getWarmStartupPrompt()) {
+      return;
+    }
+    try {
+      const chat = this.getChat();
+      await runForkedAgent({
+        config: this.config,
+        // Content is irrelevant — it lands after the cached prefix, and a
+        // suffix divergence is cheap. The real first message costs ~16 tokens
+        // more than an identical repeat, measured.
+        userMessage: 'Warm.',
+        cacheSafeParams: {
+          generationConfig: chat.getGenerationConfig(),
+          // Deliberately not slimmed: the real first turn sends the unslimmed
+          // history, and the warm prefix has to match it to be reused.
+          history: chat.getHistory(true),
+          model: this.config.getModel(),
+          version: 0,
+        },
+        // Non-negotiable — see (1) above.
+        preserveTools: true,
+        maxOutputTokens: 1,
+      });
+    } catch {
+      // Best-effort by design.
+    }
   }
 
   /**

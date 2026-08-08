@@ -675,6 +675,11 @@
           "type": "boolean",
           "default": true
         },
+        "warmStartupPrompt": {
+          "description": "Send the startup prompt once at launch so its prefill populates the provider prompt cache before your first message. Speeds up the first turn against a local server; costs a full prefill on every launch, including ones where you ask nothing.",
+          "type": "boolean",
+          "default": false
+        },
         "skipWorkflowUsageWarning": {
           "description": "Suppress the one-time Workflow tool usage banner that describes the QWEN_CODE_MAX_TOKENS_PER_WORKFLOW env knob. The banner fires at most once per session regardless of this setting.",
           "type": "boolean",

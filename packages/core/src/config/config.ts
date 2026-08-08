@@ -1197,6 +1197,13 @@ export interface ConfigParameters {
   /** Prevent the system from sleeping while model or tool work is in flight. */
   preventSystemSleep?: boolean;
   skipNextSpeakerCheck?: boolean;
+  /**
+   * Fire the assembled startup prompt once at session init so its prefill
+   * populates the provider's prompt cache before the user's first message.
+   * Costs a full prefill on every launch, including launches that ask
+   * nothing — off by default. See GeminiClient.warmStartupPrompt.
+   */
+  warmStartupPrompt?: boolean;
   shellExecutionConfig?: ShellExecutionConfig;
   skipLoopDetection?: boolean;
   /** Per-turn tool-call cap; <= 0 disables. See getMaxToolCallsPerTurn. */
@@ -2029,6 +2036,7 @@ export class Config {
   private readonly shouldUseNodePtyShell: boolean;
   private readonly preventSystemSleep: boolean;
   private readonly skipNextSpeakerCheck: boolean;
+  private readonly warmStartupPrompt: boolean;
   private shellExecutionConfig: ShellExecutionConfig;
   private arenaManager: ArenaManager | null = null;
   private arenaManagerChangeCallback:
@@ -2345,6 +2353,7 @@ export class Config {
       params.shouldUseNodePtyShell ?? shouldDefaultToNodePty();
     this.preventSystemSleep = params.preventSystemSleep ?? true;
     this.skipNextSpeakerCheck = params.skipNextSpeakerCheck ?? true;
+    this.warmStartupPrompt = params.warmStartupPrompt ?? false;
     this.shellExecutionConfig = {
       terminalWidth: params.shellExecutionConfig?.terminalWidth ?? 80,
       terminalHeight: params.shellExecutionConfig?.terminalHeight ?? 24,
@@ -7326,6 +7335,10 @@ export class Config {
 
   getSkipNextSpeakerCheck(): boolean {
     return this.skipNextSpeakerCheck;
+  }
+
+  getWarmStartupPrompt(): boolean {
+    return this.warmStartupPrompt;
   }
 
   getShellExecutionConfig(): ShellExecutionConfig {
