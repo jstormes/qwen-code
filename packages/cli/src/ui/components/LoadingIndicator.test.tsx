@@ -29,6 +29,10 @@ vi.mock('./GeminiRespondingSpinner.js', () => ({
     }
     return null;
   },
+  // The idle-prefill row uses the raw spinner directly: it must animate even
+  // though the streaming state is Idle, which GeminiRespondingSpinner will
+  // not do.
+  GeminiSpinner: () => <Text>MockSpinner</Text>,
 }));
 
 vi.mock('../hooks/useTerminalSize.js', () => ({
@@ -609,6 +613,47 @@ describe('<LoadingIndicator />', () => {
 
       expect(lastFrame()).toContain('Loading...');
       expect(lastFrame()).not.toContain('Prefilling context');
+      unmount();
+    });
+
+    it('renders during Idle while the startup prompt is warming', () => {
+      // The warm request fires at launch with no user turn behind it, so the
+      // app is Idle while the GPU is saturated for minutes. Without this the
+      // session looks completely inert.
+      const { lastFrame, unmount } = renderWithContext(
+        <LoadingIndicator {...defaultProps} />,
+        StreamingState.Idle,
+      );
+      expect(lastFrame()).toBe('');
+
+      act(() => {
+        reportPrefill(17000);
+      });
+
+      const output = lastFrame();
+      expect(output).toContain('Prefilling context');
+      expect(output).toContain('40%');
+      // Reduced row: there is no turn to time and nothing for esc to cancel.
+      expect(output).not.toContain('esc to cancel');
+      expect(output).not.toContain('Loading...');
+      unmount();
+    });
+
+    it('goes back to rendering nothing when an idle warm finishes', () => {
+      const { lastFrame, unmount } = renderWithContext(
+        <LoadingIndicator {...defaultProps} />,
+        StreamingState.Idle,
+      );
+      act(() => {
+        reportPrefill(17000);
+      });
+      expect(lastFrame()).toContain('Prefilling context');
+
+      act(() => {
+        promptPrefillProgressService.finish();
+      });
+
+      expect(lastFrame()).toBe('');
       unmount();
     });
 

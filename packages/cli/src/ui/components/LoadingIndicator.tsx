@@ -10,7 +10,11 @@ import { Box, Text } from 'ink';
 import { theme } from '../semantic-colors.js';
 import { useStreamingContext } from '../contexts/StreamingContext.js';
 import { StreamingState } from '../types.js';
-import { GeminiRespondingSpinner } from './GeminiRespondingSpinner.js';
+import {
+  GeminiRespondingSpinner,
+  GeminiSpinner,
+} from './GeminiRespondingSpinner.js';
+import { SCREEN_READER_LOADING } from '../textConstants.js';
 import { formatDuration, formatTokenCount } from '../utils/formatters.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { useAnimationFrame } from '../hooks/useAnimationFrame.js';
@@ -111,7 +115,28 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
   );
 
   if (streamingState === StreamingState.Idle) {
-    return null;
+    // Idle normally means nothing to report — except when the session is
+    // warming its startup prompt, which fires at launch with no user turn
+    // behind it. That prefill can run for minutes, and without this the app
+    // looks completely idle while the GPU is saturated.
+    //
+    // A deliberately reduced row: no elapsed timer (there is no turn to time)
+    // and no cancel affordance (the warm is fire-and-forget; esc has nothing
+    // to interrupt). Just the fact that work is happening, and how far along.
+    if (!prefill) {
+      return null;
+    }
+
+    return (
+      <Box paddingLeft={2}>
+        <Box marginRight={1}>
+          <GeminiSpinner altText={SCREEN_READER_LOADING} />
+        </Box>
+        <Text color={theme.text.accent} wrap="truncate-end">
+          {formatPrefillStatus(prefill.fraction, prefill.etaSeconds, !isNarrow)}
+        </Text>
+      </Box>
+    );
   }
 
   // The spinner row shows status only: phrase, timer, token estimate, and the
