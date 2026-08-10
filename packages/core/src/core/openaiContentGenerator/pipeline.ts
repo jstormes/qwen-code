@@ -41,6 +41,10 @@ import {
 } from './constants.js';
 import { createDebugLogger } from '../../utils/debugLogger.js';
 import { getToolCallPreparations } from '../tool-call-preparation.js';
+import {
+  parsePromptPrefillProgress,
+  promptPrefillProgressService,
+} from '../prompt-prefill-progress.js';
 import { InvalidStreamError } from '../invalid-stream-error.js';
 import { logProtocolTagSanitized } from '../../telemetry/loggers.js';
 import { ProtocolTagSanitizedEvent } from '../../telemetry/types.js';
@@ -681,6 +685,20 @@ export class ContentGenerationPipeline {
       // Stage 2a: Convert and yield each chunk while preserving original
       for await (const chunk of stream) {
         reportOpenAiChunk(telemetryAttempt, chunk);
+
+        // Prompt-prefill progress (llama.cpp `return_progress`, and anything
+        // that adopts the same field). These chunks carry an empty delta, so
+        // Stage 2b below discards them; publish before that happens.
+        //
+        // Read off the raw chunk rather than the converted response: this is
+        // an extension field with no place in the Gemini response shape, and
+        // it is display state, not conversation state. See
+        // promptPrefillProgress.ts for why it does not ride the event stream.
+        const prefillProgress = parsePromptPrefillProgress(chunk);
+        if (prefillProgress) {
+          promptPrefillProgressService.report(prefillProgress);
+        }
+
         // Detect API errors returned as stream content.
         // Some providers return errors (e.g., TPM throttling) as a normal SSE chunk
         // with finish_reason="error_finish" and the error in delta.content,
@@ -875,6 +893,13 @@ export class ContentGenerationPipeline {
 
       // Use shared error handling logic
       await this.handleError(error, context, request);
+    } finally {
+      // Clear the prefill bar however this stream ended — completion, error,
+      // or the consumer abandoning the generator (a generator's `finally`
+      // runs on `.return()`, which is how cancellation arrives here). A
+      // no-op unless this request actually reported progress, so there is
+      // nothing to guard.
+      promptPrefillProgressService.finish();
     }
   }
 

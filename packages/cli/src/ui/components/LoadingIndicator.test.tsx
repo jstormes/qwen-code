@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { act } from 'react';
 import { render } from 'ink-testing-library';
 import { Text } from 'ink';
 import { LoadingIndicator } from './LoadingIndicator.js';
 import { StreamingContext } from '../contexts/StreamingContext.js';
 import { StreamingState } from '../types.js';
-import { vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+import { promptPrefillProgressService } from '@qwen-code/qwen-code-core';
 import * as useTerminalSize from '../hooks/useTerminalSize.js';
 
 // Mock GeminiRespondingSpinner
@@ -464,6 +465,167 @@ describe('<LoadingIndicator />', () => {
       const output = lastFrame();
       expect(output).toContain('↓ 500 tokens');
       expect(output).not.toContain('↑');
+    });
+  });
+
+  describe('prompt prefill progress', () => {
+    // Fake timers throughout: the hook re-renders on a 200ms ticker while a
+    // report is active, and under real timers `act()` never settles because
+    // there is always another frame scheduled.
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      promptPrefillProgressService.finish();
+      vi.useRealTimers();
+    });
+
+    const TOTAL = 41592;
+
+    /** Report at `processed`, stamped now, so nothing is extrapolated yet. */
+    const reportPrefill = (processed: number) => {
+      promptPrefillProgressService.report({
+        total: TOTAL,
+        cache: 0,
+        processed,
+        timeMs: (processed / 350) * 1000,
+        receivedAt: Date.now(),
+      });
+    };
+
+    it('replaces the loading phrase with a bar while prefilling', () => {
+      const { lastFrame, unmount } = renderWithContext(
+        <LoadingIndicator {...defaultProps} />,
+        StreamingState.Responding,
+      );
+      act(() => {
+        reportPrefill(17000);
+      });
+
+      const output = lastFrame();
+      expect(output).toContain('Prefilling context');
+      expect(output).toContain('40%'); // 17000 / 41592, floored
+      expect(output).toContain('\u2593');
+      expect(output).toContain('\u2591');
+      // The witty phrase is what this displaces — that is the whole point.
+      expect(output).not.toContain('Loading...');
+      // The cancel affordance must survive; it is the only way out of a
+      // multi-minute prefill.
+      expect(output).toContain('esc to cancel');
+      unmount();
+    });
+
+    it('shows an ETA once one is worth showing', () => {
+      const { lastFrame, unmount } = renderWithContext(
+        <LoadingIndicator {...defaultProps} />,
+        StreamingState.Responding,
+      );
+      act(() => {
+        reportPrefill(17000); // ~24.6k left at 350 t/s => ~1m 10s
+      });
+
+      expect(lastFrame()).toContain('left');
+      unmount();
+    });
+
+    it('advances between server reports instead of freezing', () => {
+      // The server reports once per prompt batch — seconds apart. A bar that
+      // sat still between them would read as a hang.
+      const { lastFrame, unmount } = renderWithContext(
+        <LoadingIndicator {...defaultProps} />,
+        StreamingState.Responding,
+      );
+      act(() => {
+        reportPrefill(17000);
+      });
+      const before = lastFrame();
+
+      act(() => {
+        vi.advanceTimersByTime(3000); // no new report, just elapsed time
+      });
+
+      expect(lastFrame()).not.toBe(before);
+      expect(lastFrame()).toContain('Prefilling context');
+      unmount();
+    });
+
+    it('never reaches 100% on extrapolation alone', () => {
+      // Only the server knows it finished. A bar pinned at 100% during a
+      // continuing wait is the failure this feature exists to prevent.
+      const { lastFrame, unmount } = renderWithContext(
+        <LoadingIndicator {...defaultProps} />,
+        StreamingState.Responding,
+      );
+      act(() => {
+        reportPrefill(30000);
+      });
+      act(() => {
+        // Far longer than the projected remainder, so extrapolation is
+        // pinned against its ceiling rather than tracking the server.
+        vi.advanceTimersByTime(120_000);
+      });
+
+      expect(lastFrame()).not.toContain('100%');
+      expect(lastFrame()).toContain('99%');
+      unmount();
+    });
+
+    it('restores the loading phrase once prefill finishes', () => {
+      const { lastFrame, unmount } = renderWithContext(
+        <LoadingIndicator {...defaultProps} />,
+        StreamingState.Responding,
+      );
+      act(() => {
+        reportPrefill(17000);
+      });
+      expect(lastFrame()).toContain('Prefilling context');
+
+      act(() => {
+        promptPrefillProgressService.finish();
+      });
+
+      expect(lastFrame()).toContain('Loading...');
+      expect(lastFrame()).not.toContain('Prefilling context');
+      unmount();
+    });
+
+    it('stays quiet for a prompt served from cache', () => {
+      // A fully cached prompt reports processed == total immediately.
+      // Flashing a bar for one frame is worse than never showing one.
+      const { lastFrame, unmount } = renderWithContext(
+        <LoadingIndicator {...defaultProps} />,
+        StreamingState.Responding,
+      );
+      act(() => {
+        promptPrefillProgressService.report({
+          total: TOTAL,
+          cache: 41500,
+          processed: TOTAL,
+          timeMs: 120,
+          receivedAt: Date.now(),
+        });
+      });
+
+      expect(lastFrame()).toContain('Loading...');
+      expect(lastFrame()).not.toContain('Prefilling context');
+      unmount();
+    });
+
+    it('drops the bar on a narrow terminal but keeps the percentage', () => {
+      const { lastFrame, unmount } = renderWithContext(
+        <LoadingIndicator {...defaultProps} />,
+        StreamingState.Responding,
+        30,
+      );
+      act(() => {
+        reportPrefill(17000);
+      });
+
+      const output = lastFrame();
+      expect(output).toContain('40%');
+      expect(output).not.toContain('\u2593');
+      unmount();
     });
   });
 });

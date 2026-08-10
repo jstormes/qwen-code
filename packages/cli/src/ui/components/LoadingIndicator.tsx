@@ -14,8 +14,48 @@ import { GeminiRespondingSpinner } from './GeminiRespondingSpinner.js';
 import { formatDuration, formatTokenCount } from '../utils/formatters.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { useAnimationFrame } from '../hooks/useAnimationFrame.js';
+import { usePromptPrefillProgress } from '../hooks/use-prompt-prefill-progress.js';
 import { isNarrowWidth } from '../utils/isNarrowWidth.js';
 import { t } from '../../i18n/index.js';
+
+/** Width of the inline prefill bar, in cells. Narrow terminals drop it. */
+const PREFILL_BAR_CELLS = 15;
+
+/**
+ * Render the prefill status that replaces the loading phrase while the server
+ * is still processing the prompt.
+ *
+ * The phrase is what this displaces, and deliberately: a witty one-liner is
+ * fine over a few seconds of waiting, but a large prompt against a local
+ * server can take minutes, and for that whole time the phrase is the only
+ * thing on screen saying anything — while saying nothing. A bar with a token
+ * count and an ETA turns an unbounded wait into a bounded one.
+ */
+function formatPrefillStatus(
+  fraction: number,
+  etaSeconds: number | null,
+  withBar: boolean,
+): string {
+  // Floor, and never 100: the bar must not claim to be done while the wait
+  // continues — that is the exact impression it exists to correct.
+  const pct = Math.min(99, Math.floor(fraction * 100));
+
+  const bar = withBar
+    ? (() => {
+        const filled = Math.round(fraction * PREFILL_BAR_CELLS);
+        return `${'▓'.repeat(filled)}${'░'.repeat(PREFILL_BAR_CELLS - filled)} `;
+      })()
+    : '';
+
+  // Below a minute the ETA churns visibly on every tick, which draws the eye
+  // to the number instead of the progress. The bar carries it from there.
+  const eta =
+    etaSeconds !== null && etaSeconds >= 60
+      ? ` · ${t('~{{time}} left', { time: formatDuration(etaSeconds * 1000) })}`
+      : '';
+
+  return `${t('Prefilling context')} ${bar}${pct}%${eta}`;
+}
 
 interface LoadingIndicatorProps {
   currentLoadingPhrase?: string;
@@ -58,6 +98,7 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
   const streamingState = useStreamingContext();
   const { columns: terminalWidth } = useTerminalSize();
   const isNarrow = isNarrowWidth(terminalWidth);
+  const prefill = usePromptPrefillProgress();
 
   // Animate the streaming-chars counter locally so only this component
   // re-renders on each animation frame (100ms ≈ spinner cadence). Siblings
@@ -76,7 +117,12 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
   // The spinner row shows status only: phrase, timer, token estimate, and the
   // cancel affordance. Model reasoning lives in the collapsible thinking block
   // in history, not here.
-  const primaryText = currentLoadingPhrase;
+  // While the server is still prefilling the prompt, the phrase gives way to
+  // real progress. It comes back the moment prefill ends, which is also the
+  // moment there is finally something else to look at (streaming output).
+  const primaryText = prefill
+    ? formatPrefillStatus(prefill.fraction, prefill.etaSeconds, !isNarrow)
+    : currentLoadingPhrase;
 
   const streamingTokens = streamingCharsRef ? Math.round(animatedChars / 4) : 0;
   const outputTokens = (candidatesTokens ?? 0) + streamingTokens;
