@@ -610,6 +610,10 @@ describe('Gemini Client (client.ts)', () => {
       getCliVersion: vi.fn().mockReturnValue('1.0.0'),
       getChatCompression: vi.fn().mockReturnValue(undefined),
       getSkipNextSpeakerCheck: vi.fn().mockReturnValue(false),
+      // Mirrors the real default (opt-in): initialize() fires the startup
+      // warm through this getter, so an absent mock throws into the
+      // fire-and-forget path and every initialize() logs an unhandled error.
+      getWarmStartupPrompt: vi.fn().mockReturnValue(false),
       getUseModelRouter: vi.fn().mockReturnValue(false),
       getProjectRoot: vi.fn().mockReturnValue('/test/project/root'),
       getCwd: vi.fn().mockReturnValue('/test/project/root'),
